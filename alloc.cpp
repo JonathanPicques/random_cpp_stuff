@@ -15,15 +15,12 @@ public:
     using const_pointer = const T *;
     using const_reference = const T &;
     using difference_type = std::ptrdiff_t;
-
 public:
     template<typename U>
     struct rebind{ using other = heap_allocator<U>; };
-
 public:
     template<typename U>
-    heap_allocator(const heap_allocator<U>& other) noexcept {}
-
+    heap_allocator(const heap_allocator<U>& other) noexcept: heap_allocator() {}
 public:
     pointer allocate(size_type count)
     {
@@ -39,6 +36,11 @@ public:
     {
         return std::numeric_limits<size_type>::max() / sizeof(value_type);
     }
+public:
+    bool owns(pointer ptr, size_type size) const
+    {
+        return false; // there is no way to tell if that pointer was allocated using the default allocator
+    }
 };
 
 template <typename T, std::size_t Capacity>
@@ -52,11 +54,9 @@ public:
     using const_pointer = const T *;
     using const_reference = const T &;
     using difference_type = std::ptrdiff_t;
-
 public:
     template <typename U>
     struct rebind { using other = stack_allocator<U, Capacity>; };
-
 public:
     stack_allocator(): buffer_ {}, head_{reinterpret_cast<block_header*> (buffer_)}
     {
@@ -67,7 +67,6 @@ public:
 
     template <typename U>
     stack_allocator(const stack_allocator<U, Capacity> &other) noexcept: stack_allocator() {}
-
 public:
     pointer allocate(size_type count)
     {
@@ -116,7 +115,11 @@ public:
     {
         return Capacity / sizeof(value_type);
     }
-
+public:
+    bool owns(pointer ptr, size_type size) const
+    {
+        return ptr >= buffer_ && ptr < buffer_ + Capacity;
+    }
 private:
     struct block_header
     {
@@ -140,37 +143,36 @@ public:
     using const_pointer = const T *;
     using const_reference = const T &;
     using difference_type = std::ptrdiff_t;
-
 public:
     template <typename U>
     struct rebind { using other = fallback_allocator<U, PrimaryAllocator, FallbackAllocator>; };
-
 public:
-    fallback_allocator()
-    {
-    }
-
     template <typename U>
     fallback_allocator(const fallback_allocator<U, PrimaryAllocator, FallbackAllocator> &other) noexcept: fallback_allocator() {}
-
 public:
     pointer allocate(size_type count)
     {
-        return nullptr;
+        pointer ptr = primary.allocate(count);
+        if (!ptr) ptr = fallback.allocate(count);
+        return ptr;
     }
 
     void deallocate(pointer ptr, size_type count) noexcept
     {
-        // not yet implemented
+        primary.deallocate(ptr, count);
+        fallback.deallocate(ptr, count);
     }
 
     size_type max_size() const noexcept
     {
-        // not yet implemented
-        return 0;
+        return std::max(primary.max_size(), fallback.max_size());
     }
-
+public:
+    bool owns(pointer ptr, size_type size) const
+    {
+        return primary.owns(ptr, size) || fallback.owns(ptr, size);
+    }
 private:
-    PrimaryAllocator primary_allocator;
-    FallbackAllocator fallback_allocator;
+    PrimaryAllocator primary;
+    FallbackAllocator fallback;
 };
